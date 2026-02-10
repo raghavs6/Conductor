@@ -33,5 +33,7 @@ def test_chat() -> None:
 
     trace_path = next(iter(new_files))
     with trace_path.open("r", encoding="utf-8") as f:
-        first_event = json.loads(f.readline())
-    assert first_event["type"] == "request_received"
+        events = [json.loads(line) for line in f if line.strip()]
+    event_types = {event["type"] for event in events}
+    assert "request_received" in event_types
+    assert "tool_called" in event_types

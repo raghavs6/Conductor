@@ -8,6 +8,8 @@ Build an AI assistant that can understand complex user requests, decompose them 
 
 - Install dependencies: `pip install -r requirements-dev.txt`
 - Run tests: `python -m pytest -q`
+- Docker build: `docker build -t mm-ai-agent .`
+- Docker run: `docker run --rm -p 8000:8000 mm-ai-agent`
 
 ## Example user requests
 

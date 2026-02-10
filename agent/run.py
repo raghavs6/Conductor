@@ -5,6 +5,16 @@ import uuid
 from pathlib import Path
 from typing import Any, Protocol
 
+from tools.mocks import TOOL_REGISTRY
+from tools.types import (
+    CalendarRequest,
+    EmailRequest,
+    MapsRequest,
+    SearchRequest,
+    ToolCallEnvelope,
+    ToolError,
+)
+
 from .types import StateV1, TraceEvent, now_iso
 
 
@@ -59,6 +69,34 @@ def _emit(
     )
 
 
+def _select_tool(message: str) -> str:
+    lowered = message.lower()
+    if any(keyword in lowered for keyword in ("email", "mail", "inbox")):
+        return "email"
+    if any(keyword in lowered for keyword in ("calendar", "schedule", "meeting")):
+        return "calendar"
+    if any(keyword in lowered for keyword in ("map", "maps", "directions", "route")):
+        return "maps"
+    return "search"
+
+
+def _build_request(tool_name: str, message: str) -> tuple[dict[str, Any], Any]:
+    if tool_name == "email":
+        request = EmailRequest(to="user@example.com", subject="Request", body=message)
+    elif tool_name == "calendar":
+        request = CalendarRequest(
+            title=message,
+            start_iso="2026-02-10T09:00:00Z",
+            end_iso="2026-02-10T10:00:00Z",
+            location="Virtual",
+        )
+    elif tool_name == "maps":
+        request = MapsRequest(origin="Origin", destination=message, mode="driving")
+    else:
+        request = SearchRequest(query=message)
+    return request.model_dump(), request
+
+
 def run_chat(
     message: str,
     *,
@@ -71,15 +109,27 @@ def run_chat(
     try:
         _emit(trace_sink, "request_received", request_id, {"message": message})
 
-        state.plan = [{"type": "echo", "input": message}]
+        tool_name = _select_tool(message)
+        state.plan = [{"type": "tool", "tool_name": tool_name, "input": message}]
         _emit(trace_sink, "plan_created", request_id, {"plan": state.plan})
         state_store.save(state)
 
-        reply = f"You said: {message}"
-        state.tool_calls.append({"type": "echo", "input": message, "output": reply})
-        _emit(trace_sink, "tool_executed", request_id, {"tool": "echo"})
+        args, request = _build_request(tool_name, message)
+        handler = TOOL_REGISTRY[tool_name]
+        result = handler(request)
+
+        envelope = ToolCallEnvelope(tool_name=tool_name, args=args)
+        if isinstance(result, ToolError):
+            envelope.error = result
+            state.errors.append(result.message)
+        else:
+            envelope.result = result.model_dump()
+
+        state.tool_calls.append(envelope.model_dump())
+        _emit(trace_sink, "tool_called", request_id, envelope.model_dump())
         state_store.save(state)
 
+        reply = f"You said: {message}"
         state.result = {"reply": reply}
         _emit(trace_sink, "verification_passed", request_id, {})
         state_store.save(state)
