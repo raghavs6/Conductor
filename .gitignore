@@ -29,3 +29,9 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Agent traces
+traces/
+
+# Prettier cache
+node_modules/.cache/prettier/

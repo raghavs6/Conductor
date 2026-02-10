@@ -4,6 +4,11 @@
 
 Build an AI assistant that can understand complex user requests, decompose them into multiple steps, call external tools, verify results, handle follow-ups, support multimodal inputs (images/files), and improve over time via automated evaluations.
 
+## Development setup
+
+- Install dependencies: `pip install -r requirements-dev.txt`
+- Run tests: `python -m pytest -q`
+
 ## Example user requests
 
 - “Plan my trip and book it.”
