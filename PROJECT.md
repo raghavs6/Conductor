@@ -10,6 +10,7 @@ Build an AI assistant that can understand complex user requests, decompose them 
 - Run tests: `python -m pytest -q`
 - Docker build: `docker build -t mm-ai-agent .`
 - Docker run: `docker run --rm -p 8000:8000 mm-ai-agent`
+- Run evals: `python -m eval.runner`
 
 ## Example user requests
 

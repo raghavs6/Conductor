@@ -35,3 +35,6 @@ traces/
 
 # Prettier cache
 node_modules/.cache/prettier/
+
+# Eval outputs
+eval/results.json
