@@ -33,8 +33,10 @@ Thumbs.db
 # Agent traces
 traces/
 
-# Prettier cache
-node_modules/.cache/prettier/
+# Node / Prettier
+node_modules/
+package.json
+package-lock.json
 
 # Eval outputs
 eval/results.json

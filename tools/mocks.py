@@ -3,23 +3,35 @@ from __future__ import annotations
 import hashlib
 from typing import Any, Callable
 
+from .calendar_google import calendar_google_tool
+from .calendar_outlook import calendar_outlook_tool
+from .gmail import gmail_tool
+from .transport import transport_tool
 from .types import (
+    CalendarReadRequest,
     CalendarRequest,
     CalendarResponse,
     EmailRequest,
     EmailResponse,
+    EmailSearchRequest,
     MapsRequest,
     MapsResponse,
     SearchRequest,
     SearchResponse,
     SearchResult,
     ToolError,
+    TransportSearchRequest,
 )
 
 
 def _stable_id(value: str, prefix: str) -> str:
     digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:10]
     return f"{prefix}_{digest}"
+
+
+# ---------------------------------------------------------------------------
+# Legacy mock tools (kept for backward compatibility)
+# ---------------------------------------------------------------------------
 
 
 def search_tool(payload: SearchRequest) -> SearchResponse | ToolError:
@@ -72,11 +84,66 @@ def email_tool(payload: EmailRequest) -> EmailResponse | ToolError:
     return EmailResponse(message_id=message_id)
 
 
+# ---------------------------------------------------------------------------
+# Adapter wrappers so new tools fit the Any→Any registry signature
+# ---------------------------------------------------------------------------
+
+
+def _read_calendar_adapter(payload: Any) -> Any:
+    if isinstance(payload, dict):
+        payload = CalendarReadRequest(**payload)
+    provider = getattr(payload, "provider", "google")
+    if provider == "outlook":
+        return calendar_outlook_tool(payload)
+    return calendar_google_tool(payload)
+
+
+def _search_gmail_adapter(payload: Any) -> Any:
+    if isinstance(payload, dict):
+        payload = EmailSearchRequest(**payload)
+    return gmail_tool(payload)
+
+
+def _search_transport_adapter(payload: Any) -> Any:
+    if isinstance(payload, dict):
+        payload = TransportSearchRequest(**payload)
+    return transport_tool(payload)
+
+
+def _search_adapter(payload: Any) -> Any:
+    if isinstance(payload, dict):
+        payload = SearchRequest(**payload)
+    return search_tool(payload)
+
+
+def _maps_adapter(payload: Any) -> Any:
+    if isinstance(payload, dict):
+        payload = MapsRequest(**payload)
+    return maps_tool(payload)
+
+
+def _calendar_adapter(payload: Any) -> Any:
+    if isinstance(payload, dict):
+        payload = CalendarRequest(**payload)
+    return calendar_tool(payload)
+
+
+def _email_adapter(payload: Any) -> Any:
+    if isinstance(payload, dict):
+        payload = EmailRequest(**payload)
+    return email_tool(payload)
+
+
 ToolHandler = Callable[[Any], Any]
 
 TOOL_REGISTRY: dict[str, ToolHandler] = {
-    "search": search_tool,
-    "maps": maps_tool,
-    "calendar": calendar_tool,
-    "email": email_tool,
+    # Legacy tools (with dict-accepting adapters)
+    "search": _search_adapter,
+    "maps": _maps_adapter,
+    "calendar": _calendar_adapter,
+    "email": _email_adapter,
+    # New travel tools
+    "read_calendar": _read_calendar_adapter,
+    "search_gmail": _search_gmail_adapter,
+    "search_transport": _search_transport_adapter,
 }

@@ -18,11 +18,12 @@ def score_tool_calls(
         event["payload"] for event in events if event.get("type") == "tool_called"
     ]
 
-    called_tools = {call.get("tool_name") for call in tool_calls}
+    called_tools = [call.get("tool_name") for call in tool_calls]
+    called_tools_set = set(called_tools)
     reasons: list[str] = []
 
     for tool in expected_tools:
-        if tool not in called_tools:
+        if tool not in called_tools_set:
             reasons.append(f"missing expected tool call: {tool}")
 
     has_errors = any(call.get("error") for call in tool_calls)

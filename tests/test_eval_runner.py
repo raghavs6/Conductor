@@ -8,5 +8,5 @@ def test_eval_runner_writes_report(tmp_path: Path) -> None:
     report = run_evals(output_path=output)
 
     assert output.exists()
-    assert report["summary"]["total"] == 3
-    assert len(report["results"]) == 3
+    assert report["summary"]["total"] == 6
+    assert len(report["results"]) == 6

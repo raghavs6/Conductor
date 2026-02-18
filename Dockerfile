@@ -11,6 +11,7 @@ RUN python -m pip install --upgrade pip \
 
 COPY app ./app
 COPY agent ./agent
+COPY tools ./tools
 COPY pyproject.toml ./
 
 RUN adduser --disabled-password --gecos "" appuser \
