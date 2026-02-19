@@ -3,17 +3,12 @@ from __future__ import annotations
 import hashlib
 from typing import Any, Callable
 
-from .calendar_google import calendar_google_tool
-from .calendar_outlook import calendar_outlook_tool
-from .gmail import gmail_tool
 from .transport import transport_tool
 from .types import (
-    CalendarReadRequest,
     CalendarRequest,
     CalendarResponse,
     EmailRequest,
     EmailResponse,
-    EmailSearchRequest,
     MapsRequest,
     MapsResponse,
     SearchRequest,
@@ -85,23 +80,8 @@ def email_tool(payload: EmailRequest) -> EmailResponse | ToolError:
 
 
 # ---------------------------------------------------------------------------
-# Adapter wrappers so new tools fit the Any→Any registry signature
+# Adapter wrappers so tools fit the Any→Any registry signature
 # ---------------------------------------------------------------------------
-
-
-def _read_calendar_adapter(payload: Any) -> Any:
-    if isinstance(payload, dict):
-        payload = CalendarReadRequest(**payload)
-    provider = getattr(payload, "provider", "google")
-    if provider == "outlook":
-        return calendar_outlook_tool(payload)
-    return calendar_google_tool(payload)
-
-
-def _search_gmail_adapter(payload: Any) -> Any:
-    if isinstance(payload, dict):
-        payload = EmailSearchRequest(**payload)
-    return gmail_tool(payload)
 
 
 def _search_transport_adapter(payload: Any) -> Any:
@@ -143,7 +123,5 @@ TOOL_REGISTRY: dict[str, ToolHandler] = {
     "calendar": _calendar_adapter,
     "email": _email_adapter,
     # New travel tools
-    "read_calendar": _read_calendar_adapter,
-    "search_gmail": _search_gmail_adapter,
     "search_transport": _search_transport_adapter,
 }

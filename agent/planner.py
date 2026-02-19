@@ -26,8 +26,6 @@ class TravelPlanStep:
 _FLIGHT_KW = {"flight", "fly", "plane", "airline", "airport"}
 _TRAIN_KW = {"train", "rail", "amtrak", "railway"}
 _BUS_KW = {"bus", "greyhound", "coach"}
-_CALENDAR_KW = {"calendar", "schedule", "conflict", "busy", "free", "available"}
-_EMAIL_KW = {"email", "gmail", "inbox", "confirmation", "ticket", "booking"}
 
 
 def _words(text: str) -> set[str]:
@@ -142,8 +140,6 @@ def build_plan(message: str) -> list[TravelPlanStep]:
     words = _words(message)
     steps: list[TravelPlanStep] = []
 
-    wants_calendar = bool(words & _CALENDAR_KW)
-    wants_email = bool(words & _EMAIL_KW)
     wants_transport = bool(
         words & _FLIGHT_KW | words & _TRAIN_KW | words & _BUS_KW
         or any(
@@ -152,36 +148,7 @@ def build_plan(message: str) -> list[TravelPlanStep]:
         )
     )
 
-    # Step 1 — check calendar for conflicts (if requested or implied)
-    if wants_calendar or wants_transport:
-        dep_date = _detect_date(message)
-        steps.append(
-            TravelPlanStep(
-                tool_name="read_calendar",
-                args={
-                    "provider": "google",
-                    "start_iso": f"{dep_date}T00:00:00Z",
-                    "end_iso": f"{dep_date}T23:59:59Z",
-                },
-                description=f"Check Google Calendar for conflicts on {dep_date}",
-            )
-        )
-
-    # Step 2 — search inbox for existing confirmations
-    if wants_email or wants_transport:
-        steps.append(
-            TravelPlanStep(
-                tool_name="search_gmail",
-                args={
-                    "provider": "gmail",
-                    "query": "flight OR train OR bus confirmation",
-                    "max_results": 3,
-                },
-                description="Search Gmail for existing travel confirmations",
-            )
-        )
-
-    # Step 3 — search for transport options
+    # Step 1 — search for transport options
     if wants_transport:
         origin, destination = _detect_locations(message)
         dep_date = _detect_date(message)
@@ -202,21 +169,12 @@ def build_plan(message: str) -> list[TravelPlanStep]:
 
     # Fallback — if nothing matched, do a generic search
     if not steps:
-        if wants_email:
-            steps.append(
-                TravelPlanStep(
-                    tool_name="search_gmail",
-                    args={"provider": "gmail", "query": message, "max_results": 5},
-                    description="Search Gmail inbox",
-                )
+        steps.append(
+            TravelPlanStep(
+                tool_name="search",
+                args={"query": message},
+                description="General web search",
             )
-        else:
-            steps.append(
-                TravelPlanStep(
-                    tool_name="search",
-                    args={"query": message},
-                    description="General web search",
-                )
-            )
+        )
 
     return steps

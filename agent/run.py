@@ -87,29 +87,7 @@ def _format_reply(message: str, step_results: list[dict[str, Any]]) -> str:
         if not result:
             continue
 
-        if tool == "read_calendar":
-            events = result.get("events", [])
-            if events:
-                lines = [
-                    f"📅 **Calendar ({result.get('provider', 'google')}) — {len(events)} event(s) found:**"
-                ]
-                for ev in events:
-                    lines.append(f"  • {ev['title']} @ {ev['start_iso'][:10]}")
-                parts.append("\n".join(lines))
-            else:
-                parts.append("📅 No calendar conflicts found.")
-
-        elif tool == "search_gmail":
-            msgs = result.get("messages", [])
-            if msgs:
-                lines = [f"📧 **Gmail — {len(msgs)} travel email(s) found:**"]
-                for m in msgs:
-                    lines.append(f"  • {m['subject']} ({m['date_iso'][:10]})")
-                parts.append("\n".join(lines))
-            else:
-                parts.append("📧 No matching emails found.")
-
-        elif tool == "search_transport":
+        if tool == "search_transport":
             options = result.get("options", [])
             origin = result.get("origin", "?")
             dest = result.get("destination", "?")

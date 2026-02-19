@@ -1,105 +1,16 @@
-"""Tests for the new travel tools (calendar, gmail, transport)."""
+"""Tests for the transport tool."""
 
 from __future__ import annotations
 
-from tools.calendar_google import calendar_google_tool
-from tools.calendar_outlook import calendar_outlook_tool
-from tools.gmail import gmail_tool
+import os
+from unittest.mock import MagicMock, patch
+
 from tools.transport import transport_tool
 from tools.types import (
-    CalendarReadRequest,
-    EmailSearchRequest,
     TransportSearchRequest,
+    TransportSearchResponse,
     ToolError,
 )
-
-
-# ---------------------------------------------------------------------------
-# Google Calendar
-# ---------------------------------------------------------------------------
-
-
-class TestCalendarGoogle:
-    def test_returns_events(self) -> None:
-        req = CalendarReadRequest(
-            provider="google",
-            start_iso="2026-02-20T00:00:00Z",
-            end_iso="2026-02-22T23:59:59Z",
-        )
-        result = calendar_google_tool(req)
-        assert not isinstance(result, ToolError)
-        assert len(result.events) > 0
-        assert result.provider == "google"
-
-    def test_deterministic(self) -> None:
-        req = CalendarReadRequest(
-            provider="google",
-            start_iso="2026-02-20T00:00:00Z",
-            end_iso="2026-02-22T23:59:59Z",
-        )
-        assert calendar_google_tool(req) == calendar_google_tool(req)
-
-    def test_validation_error_on_missing_dates(self) -> None:
-        req = CalendarReadRequest(provider="google", start_iso="", end_iso="")
-        result = calendar_google_tool(req)
-        assert isinstance(result, ToolError)
-        assert result.type == "validation"
-
-
-# ---------------------------------------------------------------------------
-# Outlook Calendar
-# ---------------------------------------------------------------------------
-
-
-class TestCalendarOutlook:
-    def test_returns_events(self) -> None:
-        req = CalendarReadRequest(
-            provider="outlook",
-            start_iso="2026-02-20T00:00:00Z",
-            end_iso="2026-02-22T23:59:59Z",
-        )
-        result = calendar_outlook_tool(req)
-        assert not isinstance(result, ToolError)
-        assert len(result.events) > 0
-        assert result.provider == "outlook"
-
-    def test_deterministic(self) -> None:
-        req = CalendarReadRequest(
-            provider="outlook",
-            start_iso="2026-02-20T00:00:00Z",
-            end_iso="2026-02-22T23:59:59Z",
-        )
-        assert calendar_outlook_tool(req) == calendar_outlook_tool(req)
-
-
-# ---------------------------------------------------------------------------
-# Gmail
-# ---------------------------------------------------------------------------
-
-
-class TestGmail:
-    def test_returns_messages(self) -> None:
-        req = EmailSearchRequest(provider="gmail", query="flight confirmation")
-        result = gmail_tool(req)
-        assert not isinstance(result, ToolError)
-        assert len(result.messages) > 0
-        assert result.provider == "gmail"
-
-    def test_deterministic(self) -> None:
-        req = EmailSearchRequest(provider="gmail", query="train")
-        assert gmail_tool(req) == gmail_tool(req)
-
-    def test_validation_error_on_empty_query(self) -> None:
-        req = EmailSearchRequest(provider="gmail", query="")
-        result = gmail_tool(req)
-        assert isinstance(result, ToolError)
-        assert result.type == "validation"
-
-    def test_max_results_respected(self) -> None:
-        req = EmailSearchRequest(provider="gmail", query="flight", max_results=1)
-        result = gmail_tool(req)
-        assert not isinstance(result, ToolError)
-        assert len(result.messages) <= 1
 
 
 # ---------------------------------------------------------------------------
@@ -179,3 +90,99 @@ class TestTransport:
         result = transport_tool(req)
         assert not isinstance(result, ToolError)
         assert len(result.options) <= 2
+
+
+# ---------------------------------------------------------------------------
+# Transport — real AviationStack API (mocked HTTP)
+# ---------------------------------------------------------------------------
+
+
+class TestTransportReal:
+    """Tests for AviationStack real-API path using mocked HTTP."""
+
+    FAKE_RESPONSE = {
+        "pagination": {"count": 1},
+        "data": [
+            {
+                "departure": {"scheduled": "2026-03-01T08:00:00+00:00"},
+                "arrival": {"scheduled": "2026-03-01T11:30:00+00:00"},
+                "airline": {"name": "Test Airlines"},
+                "flight": {"iata": "TS100"},
+            }
+        ],
+    }
+
+    def _make_mock_resp(self, ok=True, json_data=None, status_code=200):
+        m = MagicMock()
+        m.ok = ok
+        m.status_code = status_code
+        m.json.return_value = json_data or self.FAKE_RESPONSE
+        return m
+
+    def test_parses_flight_correctly(self):
+        with patch("tools.transport.requests") as mock_req, patch.dict(
+            os.environ,
+            {"USE_REAL_TRANSPORT_API": "1", "AVIATIONSTACK_API_KEY": "test_key"},
+        ):
+            mock_req.get.return_value = self._make_mock_resp()
+            mock_req.exceptions.Timeout = Exception
+            mock_req.exceptions.RequestException = Exception
+            req = TransportSearchRequest(
+                origin="ORD", destination="JFK", departure_date="2026-03-01"
+            )
+            result = transport_tool(req)
+        assert isinstance(result, TransportSearchResponse)
+        assert len(result.options) == 1
+        opt = result.options[0]
+        assert opt.carrier == "Test Airlines"
+        assert opt.duration_min == 210  # 3.5 hours
+        assert opt.mode == "flight"
+        assert opt.price_usd > 0
+
+    def test_auth_error_on_missing_key(self):
+        env = {"USE_REAL_TRANSPORT_API": "1"}
+        with patch("tools.transport.requests") as mock_req, patch.dict(
+            os.environ, env, clear=False
+        ):
+            mock_req.exceptions.Timeout = Exception
+            mock_req.exceptions.RequestException = Exception
+            os.environ.pop("AVIATIONSTACK_API_KEY", None)
+            req = TransportSearchRequest(
+                origin="ORD", destination="JFK", departure_date="2026-03-01"
+            )
+            result = transport_tool(req)
+        assert isinstance(result, ToolError)
+        assert result.type == "auth"
+
+    def test_no_results_error_on_empty_data(self):
+        with patch("tools.transport.requests") as mock_req, patch.dict(
+            os.environ,
+            {"USE_REAL_TRANSPORT_API": "1", "AVIATIONSTACK_API_KEY": "test_key"},
+        ):
+            mock_req.get.return_value = self._make_mock_resp(
+                json_data={"pagination": {"count": 0}, "data": []}
+            )
+            mock_req.exceptions.Timeout = Exception
+            mock_req.exceptions.RequestException = Exception
+            req = TransportSearchRequest(
+                origin="ORD", destination="JFK", departure_date="2026-03-01"
+            )
+            result = transport_tool(req)
+        assert isinstance(result, ToolError)
+        assert result.type == "no_results"
+
+    def test_http_401_returns_auth_error(self):
+        with patch("tools.transport.requests") as mock_req, patch.dict(
+            os.environ,
+            {"USE_REAL_TRANSPORT_API": "1", "AVIATIONSTACK_API_KEY": "bad_key"},
+        ):
+            mock_req.get.return_value = self._make_mock_resp(ok=False, status_code=401)
+            mock_req.exceptions.Timeout = Exception
+            mock_req.exceptions.RequestException = Exception
+            req = TransportSearchRequest(
+                origin="ORD", destination="JFK", departure_date="2026-03-01"
+            )
+            result = transport_tool(req)
+        assert isinstance(result, ToolError)
+        assert result.type == "auth"
+        assert result.retryable is False

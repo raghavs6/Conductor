@@ -76,58 +76,6 @@ class EmailResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Calendar read (Google / Outlook)
-# ---------------------------------------------------------------------------
-
-
-class CalendarReadRequest(BaseModel):
-    """Read upcoming calendar events for a given date range."""
-
-    provider: Literal["google", "outlook"] = "google"
-    start_iso: str  # ISO-8601 datetime, e.g. "2026-02-20T00:00:00Z"
-    end_iso: str  # ISO-8601 datetime, e.g. "2026-02-23T23:59:59Z"
-
-
-class CalendarEvent(BaseModel):
-    event_id: str
-    title: str
-    start_iso: str
-    end_iso: str
-    location: str | None = None
-
-
-class CalendarReadResponse(BaseModel):
-    provider: str
-    events: list[CalendarEvent]
-
-
-# ---------------------------------------------------------------------------
-# Email / inbox search (Gmail / Outlook)
-# ---------------------------------------------------------------------------
-
-
-class EmailSearchRequest(BaseModel):
-    """Search the inbox for travel-related emails."""
-
-    provider: Literal["gmail", "outlook"] = "gmail"
-    query: str  # e.g. "flight confirmation"
-    max_results: int = 5
-
-
-class EmailMessage(BaseModel):
-    message_id: str
-    subject: str
-    from_address: str
-    date_iso: str
-    snippet: str
-
-
-class EmailSearchResponse(BaseModel):
-    provider: str
-    messages: list[EmailMessage]
-
-
-# ---------------------------------------------------------------------------
 # Transport search (flights, trains, buses)
 # ---------------------------------------------------------------------------
 

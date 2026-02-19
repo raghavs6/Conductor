@@ -1,5 +1,3 @@
-# Codex Working Agreement
-
 ## Non-negotiables
 
 - Make SMALL, incremental changes. Do not rewrite architecture without updating PROJECT.md.

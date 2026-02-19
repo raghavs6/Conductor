@@ -1,7 +1,7 @@
 """Transport search tool (flights, trains, buses) — mock + real-API stub.
 
-Set USE_REAL_TRANSPORT_API=1 in your .env (plus AMADEUS_CLIENT_ID,
-AMADEUS_CLIENT_SECRET) to switch to the live Amadeus API for flights.
+Set USE_REAL_TRANSPORT_API=1 in your .env (plus AVIATIONSTACK_API_KEY)
+to switch to the live AviationStack API for flights.
 Train/bus real APIs can be wired in similarly.
 """
 
@@ -10,6 +10,11 @@ from __future__ import annotations
 import hashlib
 import os
 from datetime import datetime, timedelta, timezone
+
+try:
+    import requests  # type: ignore[import]
+except ImportError:
+    requests = None  # type: ignore[assignment]
 
 from .types import (
     TransportOption,
@@ -140,94 +145,128 @@ def _mock_transport(
 
 
 # ---------------------------------------------------------------------------
-# Real-API stub (only active when USE_REAL_TRANSPORT_API=1)
+# Real-API implementation (only active when USE_REAL_TRANSPORT_API=1)
 # ---------------------------------------------------------------------------
 
 
 def _real_transport(
     payload: TransportSearchRequest,
-) -> TransportSearchResponse | ToolError:  # pragma: no cover
-    """Stub for real Amadeus flight search API."""
-    try:
-        import requests  # type: ignore
-    except ImportError:
+) -> TransportSearchResponse | ToolError:
+    """AviationStack flight search API."""
+    if requests is None:
         return ToolError(
             type="unknown",
             message="requests not installed. Run: pip install requests",
             retryable=False,
         )
 
-    # 1. Get access token
-    token_resp = requests.post(
-        "https://test.api.amadeus.com/v1/security/oauth2/token",
-        data={
-            "grant_type": "client_credentials",
-            "client_id": os.environ.get("AMADEUS_CLIENT_ID", ""),
-            "client_secret": os.environ.get("AMADEUS_CLIENT_SECRET", ""),
-        },
-        timeout=10,
-    )
-    if not token_resp.ok:
-        return ToolError(type="auth", message="Amadeus auth failed", retryable=True)
-    access_token = token_resp.json().get("access_token", "")
+    api_key = os.environ.get("AVIATIONSTACK_API_KEY", "")
+    if not api_key:
+        return ToolError(
+            type="auth",
+            message="AVIATIONSTACK_API_KEY is not set",
+            retryable=False,
+        )
 
-    # 2. Search flights (IATA codes required for real API)
-    search_resp = requests.get(
-        "https://test.api.amadeus.com/v2/shopping/flight-offers",
-        headers={"Authorization": f"Bearer {access_token}"},
-        params={
-            "originLocationCode": payload.origin,
-            "destinationLocationCode": payload.destination,
-            "departureDate": payload.departure_date,
-            "adults": 1,
-            "max": payload.max_results,
-            "currencyCode": "USD",
-        },
-        timeout=15,
-    )
-    if not search_resp.ok:
+    origin = payload.origin.strip()
+    destination = payload.destination.strip()
+
+    try:
+        resp = requests.get(
+            "http://api.aviationstack.com/v1/flights",
+            params={
+                "access_key": api_key,
+                "dep_iata": origin,
+                "arr_iata": destination,
+                "flight_date": payload.departure_date,
+                "limit": payload.max_results,
+                "flight_status": "scheduled",
+            },
+            timeout=15,
+        )
+    except requests.exceptions.Timeout:
+        return ToolError(
+            type="timeout", message="AviationStack request timed out", retryable=True
+        )
+    except requests.exceptions.RequestException as exc:
+        return ToolError(type="unknown", message=str(exc), retryable=True)
+
+    if not resp.ok:
+        if resp.status_code == 401:
+            return ToolError(
+                type="auth",
+                message="AviationStack auth failed — check AVIATIONSTACK_API_KEY",
+                retryable=False,
+            )
         return ToolError(
             type="unknown",
-            message=f"Amadeus search error: {search_resp.status_code}",
+            message=f"AviationStack error: {resp.status_code}",
             retryable=True,
         )
 
-    offers = search_resp.json().get("data", [])
+    data = resp.json().get("data", [])
+    if not data:
+        return ToolError(
+            type="no_results",
+            message="No flights found for that route/date",
+            retryable=False,
+        )
+
     options: list[TransportOption] = []
-    for offer in offers:
-        seg = offer["itineraries"][0]["segments"][0]
+    for flight in data:
+        dep_str = (flight.get("departure") or {}).get("scheduled")
+        arr_str = (flight.get("arrival") or {}).get("scheduled")
+        if not dep_str or not arr_str:
+            continue
+
+        try:
+            dep_dt = datetime.fromisoformat(dep_str)
+            arr_dt = datetime.fromisoformat(arr_str)
+        except ValueError:
+            continue
+
+        duration_min = (arr_dt - dep_dt).total_seconds() / 60
+        if duration_min <= 0:
+            continue
+
+        flight_iata = (flight.get("flight") or {}).get(
+            "iata"
+        ) or f"{origin}{destination}"
+        carrier = (flight.get("airline") or {}).get("name") or "Unknown"
+
+        # Deterministic mock price: ~$190–$240 range with per-flight variation via hash
+        price_usd = round(
+            189.99
+            + len(origin) * 2.5
+            + (int(_stable_id(flight_iata)[:4], 16) % 100) * 0.5,
+            2,
+        )
+
         options.append(
             TransportOption(
-                option_id=offer["id"],
+                option_id=_stable_id(flight_iata),
                 mode="flight",
-                carrier=seg["carrierCode"],
-                departure_iso=seg["departure"]["at"],
-                arrival_iso=seg["arrival"]["at"],
-                duration_min=int(
-                    offer["itineraries"][0]["duration"]
-                    .replace("PT", "")
-                    .replace("H", "*60+")
-                    .replace("M", "")
-                    .split("+")[0]
-                )
-                * 60
-                + int(
-                    offer["itineraries"][0]["duration"]
-                    .replace("PT", "")
-                    .replace("H", "*60+")
-                    .replace("M", "")
-                    .split("+")[1]
-                    or 0
-                ),
-                price_usd=float(offer["price"]["total"]),
-                stops=len(offer["itineraries"][0]["segments"]) - 1,
-                booking_url="https://amadeus.com",
+                carrier=carrier,
+                departure_iso=dep_str,
+                arrival_iso=arr_str,
+                duration_min=int(duration_min),
+                price_usd=price_usd,
+                stops=0,
+                booking_url=f"https://www.google.com/flights#flt={origin}.{destination}.{payload.departure_date}",
             )
         )
+
+    if not options:
+        return ToolError(
+            type="no_results",
+            message="No valid flight records in response",
+            retryable=False,
+        )
+
     options.sort(key=lambda o: o.price_usd)
     return TransportSearchResponse(
-        origin=payload.origin,
-        destination=payload.destination,
+        origin=origin,
+        destination=destination,
         options=options,
     )
 
@@ -241,5 +280,5 @@ def transport_tool(
     payload: TransportSearchRequest,
 ) -> TransportSearchResponse | ToolError:
     if os.environ.get("USE_REAL_TRANSPORT_API") == "1":
-        return _real_transport(payload)  # pragma: no cover
+        return _real_transport(payload)
     return _mock_transport(payload)
